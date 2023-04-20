@@ -1,11 +1,8 @@
 import numpy as np
 from matplotlib import pyplot as plt
-from matplotlib.animation import FuncAnimation
-"""
-Positions are given in meters
-"""
-# x y z
-point_coordinates = np.array([
+
+
+points_3d = np.array([
     [0.330, 0.485, 2.710],
     [1.523 ,0.485, 2.710],
     [2.713 ,0.485, 2.710],
@@ -16,216 +13,132 @@ point_coordinates = np.array([
     [3.908 ,2.085, 2.710]
 ],dtype=float)
 
-camera_orientation = np.array([90, 90])
-camera_position = np.array([0, 1, 0])
-
-image_width = 3264
-image_height = 2464
-def genPos(point_coordinates, camera_orientation, camera_position, img_size):
-    
-    """
-    image_width, image_height = img_size
-    sensor_width = 150 # in mm
-    sensor_height = 150 # in mm
-    focal_length = 3.04
-    fx = focal_length * image_width / sensor_width
-    fy = focal_length * image_height / sensor_height
-    cx = image_width / 2
-    cy = image_height / 2
-    A = np.array([[fx, 0, cx],
-                    [0, fy, cy],
-                    [0, 0, 1]])
-    """
-    A = np.array([[1288.6255, 0, 813.2959],
+K = np.array([[1288.6255, 0, 813.2959],
                                 [0, 1290.6448, 819.7536],
                                 [0, 0, 1]])
 
-    n_points = point_coordinates.shape[0]
 
-    p = np.zeros((int(n_points), 4))
+image_width = 3264
+image_height = 2464
 
-    p[:, 0] = point_coordinates[:, 0]
-    p[:, 1] = point_coordinates[:, 1]
-    p[:, 2] = point_coordinates[:, 2]
-    p[:, 3] = 1
-
+def project_points(points_3d, K, cam_rot, t):
     """
-    This implementation only as in considerantion rotation around x and y 
+    Projects 3D points onto a 2D image plane using the pinhole camera model.
+
+    Args:
+        points_3d: A numpy array of shape (n, 3) containing the 3D coordinates of the points to be projected.
+        K: A numpy array of shape (3, 3) containing the camera intrinsic matrix.
+        R: A numpy array of shape (1, 3) containing the camera rotation degres.
+        t: A numpy array of shape (3, 1) containing the camera translation vector.
+
+    Returns:
+        A numpy array of shape (n, 2) containing the 2D image coordinates of the projected points.
     """
-    camera_orientation = np.deg2rad(camera_orientation)
-    # x rotation
-    r1 = np.eye(3) 
-    r1[1,1] = np.cos(-camera_orientation[0])
-    r1[1,2] = -np.sin(-camera_orientation[0])
-    r1[2,1] = np.sin(-camera_orientation[0])
-    r1[2,2] = np.cos(-camera_orientation[0])
 
-    # y rotation 
-    r2 = np.eye(3)
-    r2[0,0] = np.cos(-camera_orientation[1])
-    r2[0,2] = np.sin(-camera_orientation[1])
-    r2[2,0] = -np.sin(-camera_orientation[1])
-    r2[2,2] = np.cos(-camera_orientation[1])
-    # zyxt
+    assert points_3d.shape[1] == 3, f"World points need to be of shape (n, 3)"  
+    assert K.shape[0] == 3 and K.shape[1] == 3, f"camera intrinsics need to be of shape (3, 3)"  
+    assert cam_rot.shape[0] == 3, f"camera rotation need to be a vector of shape (3)" 
+    assert t.shape[0] == 3 and t.shape[1] == 1, f"translation points need to be of shape (3, 1)"  
 
-    R = r2 @ r1
+    # transform world coordinates into homegeneous
+    points_3d_hom = np.hstack((points_3d, np.ones((points_3d.shape[0], 1))))
     
-    T = np.array([-camera_position[0], -camera_position[1], -camera_position[2]]).T
+    # calculate the Rotation Matrix
+    theta_x = np.deg2rad(cam_rot[0]) 
+    theta_y = np.deg2rad(cam_rot[1]) 
+    theta_z = np.deg2rad(cam_rot[2])
+    
+    Rx = np.array([[1, 0, 0],
+               [0, np.cos(theta_x), -np.sin(theta_x)],
+               [0, np.sin(theta_x), np.cos(theta_x)]])
 
-    B = np.c_[R, T]
+    Ry = np.array([[np.cos(theta_y), 0, np.sin(theta_y)],
+                [0, 1, 0],
+                [-np.sin(theta_y), 0, np.cos(theta_y)]])
 
-    P = np.zeros((n_points, 3))
+    Rz = np.array([[np.cos(theta_z), -np.sin(theta_z), 0],
+                [np.sin(theta_z), np.cos(theta_z), 0],
+                [0, 0, 1]])
 
-    for i in range(n_points):
-        P[i,:] = np.dot(A, np.dot(B, p[i,:].T))
+    R = np.dot(Rz, np.dot(Ry, Rx))
 
-    P[:,0] = P[:,0] / P[:,2] 
-    P[:,1] = P[:,1] / P[:,2] 
+    # stack the rotation matrix with translation to obtain a (3,4) matrix
 
-    x = P[:,0]
-    y = P[:,1]
+    RT = np.hstack((R, t))
 
-    return x, y
 
+    points_3d_cam = np.dot(RT, points_3d_hom.T)    
+    points_2d_hom = np.dot(K, points_3d_cam)
+
+    # go from 3d to 2d in the image plane
+    points_2d = (points_2d_hom[:2, :] / points_2d_hom[2, :]).T
+
+    return points_2d
+
+
+
+
+def simulate(camera_positions, K, image_width, image_height):
+    """
+    Simulates the generation of data points in a image from a known camera position
+
+    Args:
+    camera_positions: A numpy array (n,3) that contains the x, y, z camera positions in a 3d space
+    image_width: image size width in pixels
+    image_height: image size height in pixels
+    Returns:
+        A numpy array
+    """
+    points = []
+
+    # loop all the camera positons
+    for c_p in camera_positions:
+        x, y, z = c_p[0], c_p[1], c_p[2]
+
+        # rotate the camera 360 degrees
+        for r in range(0, 360, 10):
+            camera_rotation = np.array([0, 0, r])
+            translation = np.array([[x], [y], [z]])
+            points_2d = project_points(points_3d, K, camera_rotation, translation)
+            
+            # verify if the points are inside the image and save to a list
+            for i in range(points_3d.shape[0]):
+                x_img, y_img = points_2d[i][0], points_2d[i][1]
+                if x_img >= 0 and x_img <= image_width and y_img >= 0 and y_img <= image_height:
+                    points.append(
+                        [round(points_3d[i][0],3), round(points_3d[i][1],3), round(points_3d[i][2],3), 
+                         round(x, 3), round(y, 3), round(z, 3), 
+                         round(x_img,3), round(y_img, 3), 
+                         round(r,3)]
+                        )
+    return points
+
+def write_to_file(fname, data):
+    with open(fname, 'w') as f:
+        for p in data:
+            f.write(f"{p[0]} {p[1]} {p[3]} {p[4]} {p[6]},{p[7]} {p[8]}\n")
+
+
+
+# generate camera space positions
 x_mx_room = 3
 y_mx_room = 2.5
-size_x = int(x_mx_room / 0.1) + 1
-size_y = int(y_mx_room / 0.1) + 1
+size_x = int(x_mx_room / 0.25) + 1
+size_y = int(y_mx_room / 0.25) + 1
 
 xv = np.linspace(0,3,size_x)
 yv = np.linspace(0, 2, size_y)
-r = np.linspace(0,360, 37) # rotation of 10 degrees
 
-# TODO: clean this part
-data = {}
-fname = f"measures"
-with open(fname, 'w') as f:
-    for xc in xv:
-        xc = round(xc, 2)
-        for yc in yv:
-            yc = round(yc, 2)
-            for rot in r:
-                camera_orientation = np.array([90, rot])
-                camera_position = np.array([xc, yc, 0])
-                x, y = genPos(point_coordinates, camera_orientation, camera_position, (image_width, image_height))
-                cond1x = x > 0
-                cond2x = x < image_width
-                condx  =  cond1x & cond2x
-                cond1y = y > 0
-                cond2y = y < image_height
-                condy = cond1y & cond2y
-                x_i = np.where(condx, x, 0)
-                y_i = np.where(condy, y, 0)
-                x_i = np.where(x_i > 0)
-                y_i = np.where(y_i > 0)
-                common_val = np.intersect1d(x_i, y_i)
-                k = f"{xc},{yc},{rot}"
-                if common_val.shape[0] == 0: continue
-                if rot != 0: rot = rot/360 
-                f.write(f"- {xc} {yc} {rot/360}\n")
-                for c in common_val:
-                    f.write(f"{c} {round(x[c]/image_width, 3)} {round(y[c]/image_height,3)}\n")
+camera_positions = []
+for xi in xv:
+    for yi in yv:
+        camera_positions.append([xi, yi, 0])
+camera_positions = np.array(camera_positions)
+
+points = simulate(camera_positions, K, image_width, image_height)
 
 
-"""
-xv = np.linspace(0,3,3*25)
-yv = np.linspace(0, 2, 10)
-r = np.linspace(0,360,10)
-
-fig, ax = plt.subplots()
-s = ax.scatter([], [])
-ax.set_xlim(-image_width, image_width)
-ax.set_ylim(-image_height, image_height)
-
-def update(i):
-
-    s.set_offsets(np.column_stack([xs[i], ys[i]]))
-
-
-xs = []
-ys = []
-for xc in xv:
-    for yc in yv:
-        for rot in r:
-            camera_position = np.array([xc, 0.0, yc])
-            camera_orientation = np.array([90, rot])
-            x, y = genPos(point_coordinates, camera_orientation, camera_position, (image_width, image_height))
-            if x.shape[0] == 0: continue
-            xs.append(x)
-            ys.append(y)
-            
-
-ani = FuncAnimation(fig, update, frames=5, interval=1000)
-
-plt.show()
-
-"""
-
-"""
-import cv2
-import numpy as np
-
-# Define the 3D points of the object to be detected
-object_points = np.array([[0,0,0], [0,1,0], [1,1,0], [1,0,0]], dtype=np.float32)
-
-# Load the image and extract the 2D points of the object
-image = cv2.imread('image.jpg')
-gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-ret, corners = cv2.findChessboardCorners(gray, (2,2), None)
-image_points = corners.reshape(-1,2)
-
-# Define the camera matrix and distortion coefficients
-camera_matrix = np.array([[fx, 0, cx], [0, fy, cy], [0, 0, 1]], dtype=np.float32)
-dist_coeffs = np.array([k1, k2, p1, p2, k3], dtype=np.float32)
-
-# Solve PNP using the object points, image points, camera matrix, and distortion coefficients
-success, rotation_vector, translation_vector = cv2.solvePnP(object_points, image_points, camera_matrix, dist_coeffs)
-
-# Print the results
-print("Rotation vector:\n", rotation_vector)
-print("Translation vector:\n
-"""
-
-"""
-import cv2
-import numpy as np
-
-# 3D coordinates of the points in the world coordinate system
-object_points = np.array([[0,0,0], [0,1,0], [1,1,0], [1,0,0]], dtype=np.float32)
-
-# 2D coordinates of the points in the camera image
-image_points = np.array([[10,10], [20,30], [30,30], [30,10]], dtype=np.float32)
-
-# Intrinsic camera matrix (focal length, principal point)
-K = np.array([[500, 0, 320], [0, 500, 240], [0, 0, 1]], dtype=np.float32)
-
-# Distortion coefficients (k1, k2, p1, p2, k3)
-dist_coeffs = np.array([0, 0, 0, 0, 0], dtype=np.float32)
-
-# Estimate camera pose using solvePnP function
-success, rvec, tvec = cv2.solvePnP(object_points, image_points, K, dist_coeffs, flags=cv2.SOLVEPNP_ITERATIVE)
-
-# Print the rotation and translation vectors
-print("Rotation vector:\n", rvec)
-print("Translation vector:\n", tvec)
-"""
-
-# solving the perspective n point projection problem - using the iterative solver
-#(success, rotation_vector, translation_vector) = cv2.solvePnP(world_points, image_points, camera_matrix, dist_coeffs, flags=cv2.SOLVEPNP_ITERATIVE)
-
-# converting the rotation vector to a rotation matrix
-#rot_mat, jacobian = cv2.Rodrigues(rotation_vector)
-#       Estimate the object pose
-#    object_position = -np.matrix(rotation_matrix).T * np.matrix(translation_vector)
-#    object_orientation = cv2.decomposeProjectionMatrix(np.hstack((rotation_matrix, translation_vector)))[6]
-
-camera_intrinsic = np.array([[1288.6255, 0, 813.2959],
-                             [0, 1290.6448, 819.7536],
-                             [0, 0, 1]])
-
-
-distorcion_coefficients = np.array([0.2172, -0.6233, -0.0008, -0.0004, 0.5242])
-
-focal_length = 3.04 # mm
-img_res = np.array([3264, 2464])
+write = True
+if write:
+    write_to_file("measures.txt", points)
 
