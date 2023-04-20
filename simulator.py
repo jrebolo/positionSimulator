@@ -14,8 +14,8 @@ points_3d = np.array([
 ],dtype=float)
 
 K = np.array([[1288.6255, 0, 813.2959],
-                                [0, 1290.6448, 819.7536],
-                                [0, 0, 1]])
+              [0, 1290.6448, 819.7536],
+              [0, 0, 1]])
 
 
 image_width = 3264
@@ -119,26 +119,29 @@ def write_to_file(fname, data):
             f.write(f"{p[0]} {p[1]} {p[3]} {p[4]} {p[6]},{p[7]} {p[8]}\n")
 
 
+def generate_camera_space_positions():
+    # generate camera space positions
+    x_mx_room = 3
+    y_mx_room = 2.5
+    size_x = int(x_mx_room / 0.25) + 1
+    size_y = int(y_mx_room / 0.25) + 1
 
-# generate camera space positions
-x_mx_room = 3
-y_mx_room = 2.5
-size_x = int(x_mx_room / 0.25) + 1
-size_y = int(y_mx_room / 0.25) + 1
+    xv = np.linspace(0.25, 3, size_x)
+    yv = np.linspace(0.25, 2, size_y)
 
-xv = np.linspace(0,3,size_x)
-yv = np.linspace(0, 2, size_y)
+    camera_positions = []
+    for xi in xv:
+        for yi in yv:
+            camera_positions.append([xi, yi, 0])
+    camera_positions = np.array(camera_positions)
+    return camera_positions
 
-camera_positions = []
-for xi in xv:
-    for yi in yv:
-        camera_positions.append([xi, yi, 0])
-camera_positions = np.array(camera_positions)
+camera_positions = generate_camera_space_positions()
 
 points = simulate(camera_positions, K, image_width, image_height)
 
 
-write = True
+write = False
 if write:
     write_to_file("measures.txt", points)
 
