@@ -1,6 +1,6 @@
 import numpy as np
 from matplotlib import pyplot as plt
-
+import cv2
 
 points_3d = np.array([
     [0.330, 0.485, 2.710],
@@ -21,14 +21,14 @@ K = np.array([[1288.6255, 0, 813.2959],
 image_width = 3264
 image_height = 2464
 
-def project_points(points_3d, K, cam_rot, t):
+def project_points(points_3d, K, rvec, tvec):
     """
     Projects 3D points onto a 2D image plane using the pinhole camera model.
 
     Args:
         points_3d: A numpy array of shape (n, 3) containing the 3D coordinates of the points to be projected.
         K: A numpy array of shape (3, 3) containing the camera intrinsic matrix.
-        R: A numpy array of shape (1, 3) containing the camera rotation degres.
+        R: A numpy array of shape (3, 1) containing the camera rotation degres.
         t: A numpy array of shape (3, 1) containing the camera translation vector.
 
     Returns:
@@ -37,44 +37,12 @@ def project_points(points_3d, K, cam_rot, t):
 
     assert points_3d.shape[1] == 3, f"World points need to be of shape (n, 3)"  
     assert K.shape[0] == 3 and K.shape[1] == 3, f"camera intrinsics need to be of shape (3, 3)"  
-    assert cam_rot.shape[0] == 3, f"camera rotation need to be a vector of shape (3)" 
-    assert t.shape[0] == 3 and t.shape[1] == 1, f"translation points need to be of shape (3, 1)"  
+    assert rvec.shape[0] == 3, f"camera rotation need to be a vector of shape (3)" 
+    assert tvec.shape[0] == 3, f"translation points need to be a vector of shape (3)"  
 
-    # transform world coordinates into homegeneous
-    points_3d_hom = np.hstack((points_3d, np.ones((points_3d.shape[0], 1))))
-    
-    # calculate the Rotation Matrix
-    theta_x = np.deg2rad(cam_rot[0]) 
-    theta_y = np.deg2rad(cam_rot[1]) 
-    theta_z = np.deg2rad(cam_rot[2])
-    
-    Rx = np.array([[1, 0, 0],
-               [0, np.cos(theta_x), -np.sin(theta_x)],
-               [0, np.sin(theta_x), np.cos(theta_x)]])
+    image_points, _ = cv2.projectPoints(points_3d, rvec, tvec, K, None)
 
-    Ry = np.array([[np.cos(theta_y), 0, np.sin(theta_y)],
-                [0, 1, 0],
-                [-np.sin(theta_y), 0, np.cos(theta_y)]])
-
-    Rz = np.array([[np.cos(theta_z), -np.sin(theta_z), 0],
-                [np.sin(theta_z), np.cos(theta_z), 0],
-                [0, 0, 1]])
-
-    R = np.dot(Rz, np.dot(Ry, Rx))
-
-    # stack the rotation matrix with translation to obtain a (3,4) matrix
-
-    RT = np.hstack((R, t))
-
-
-    points_3d_cam = np.dot(RT, points_3d_hom.T)    
-    points_2d_hom = np.dot(K, points_3d_cam)
-
-    # go from 3d to 2d in the image plane
-    points_2d = (points_2d_hom[:2, :] / points_2d_hom[2, :]).T
-
-    return points_2d
-
+    return image_points.reshape(image_points.shape[0], -1)
 
 
 
@@ -97,10 +65,9 @@ def simulate(camera_positions, K, image_width, image_height):
 
         # rotate the camera 360 degrees
         for r in range(0, 360, 10):
-            camera_rotation = np.array([0, 0, r])
-            translation = np.array([[x], [y], [z]])
+            camera_rotation = np.array([0, 0, np.deg2rad(r)])
+            translation = np.array([x, y, z])
             points_2d = project_points(points_3d, K, camera_rotation, translation)
-            
             # verify if the points are inside the image and save to a list
             for i in range(points_3d.shape[0]):
                 x_img, y_img = points_2d[i][0], points_2d[i][1]
@@ -140,8 +107,8 @@ camera_positions = generate_camera_space_positions()
 
 points = simulate(camera_positions, K, image_width, image_height)
 
-
-write = False
-if write:
-    write_to_file("measures.txt", points)
+if __name__ == "__main__":
+    write = True
+    if write:
+        write_to_file("measures.txt", points)
 
